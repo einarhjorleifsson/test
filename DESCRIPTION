@@ -1,0 +1,33 @@
+Package: test
+Type: Package
+Title: Label Whacky Vessel Positions (Review Copy)
+Version: 0.1.0
+Authors@R: c(
+  person("Einar", "Hjörleifsson", role = c("aut", "cre"), email = "einar.hjorleifsson@gmail.com")
+  )
+Description: A review copy of the whacky-position filter rb_whack_clean(). It
+    labels implausible positions in vessel tracks (AIS, VMS) with a speed-distance-angle filter after Freitas et al.
+    (2008), followed by a forward speed scan, and never drops a row. Works on a
+    data frame and on a lazy DuckDB table. Includes rb_whack_duplicates(), which
+    flags near-duplicate reports from merged feeds, to run before it.
+License: GPL (>= 3)
+Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    dplyr,
+    Rcpp
+LinkingTo:
+    Rcpp
+Suggests:
+    argosfilter,
+    DBI,
+    dbplyr,
+    duckdb,
+    duckdbfs,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.0
