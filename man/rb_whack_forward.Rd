@@ -48,13 +48,10 @@ That is why \code{\link[=rb_whack_clean]{rb_whack_clean()}} runs \code{\link[=rb
 }
 
 \examples{
-f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-if (requireNamespace("duckdbfs", quietly = TRUE)) {
-  pings <- dplyr::collect(duckdbfs::open_dataset(f))
-  # on its own, the forward scan adopts the noisy logger's bad first ping as its anchor
-  d <- rb_whack_forward(pings)
-  table(d$example, d$whack2)
-}
+# on its own, the forward scan adopts a bad first ping after a gap as its anchor:
+# it flags 3 pings where rb_whack_clean() flags only the bad one
+d <- rb_whack_forward(whacky_sim[whacky_sim$vid == 5, ])
+sum(d$whack2)
 }
 \seealso{
 \code{\link[=rb_whack_clean]{rb_whack_clean()}}, the full recipe.

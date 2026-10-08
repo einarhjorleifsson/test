@@ -23,14 +23,16 @@
 #' and at 60 s, 6,881. Same-second reports come mostly from two feeds merged.
 #'
 #' @section Data frame and DuckDB:
-#' * **data.frame** - the whole table is sorted by `vid`, `time` and processed in one
-#'   compiled call.
+#' The labelling always runs in compiled code, in R; DuckDB never runs the filter itself.
+#' * **data.frame** - the whole frame is sorted by `vid`, `time` and labelled in one
+#'   compiled call. A table too big for memory is split by the caller into batches of whole
+#'   vessels, which is exact for the reason given below.
 #' * **lazy DuckDB table** (`tbl_lazy`) - the algorithm is sequential per vessel (a ping's
 #'   fate depends on the pings kept before it), which SQL window functions cannot express,
 #'   so the table is processed in **batches of whole vessels** (a vessel's result depends on
 #'   no other vessel, so batching is exact). Each batch is collected with only
 #'   `vid`, `time`, `lon`, `lat`, labelled in compiled code, and only the **flagged** rows
-#'   (about 0.5 percent) are written back to a temporary table on the same connection. The
+#'   (well under 1 percent) are written back to a temporary table on the same connection. The
 #'   result is a lazy table: `x` left-joined to those labels, so the next verbs, a filter
 #'   or a `write_dataset()`, run in DuckDB and the full table is never held in R. Row order
 #'   of the lazy result is not guaranteed.
@@ -45,19 +47,20 @@
 #' @param ... Passed to [rb_whack_sda()].
 #'
 #' @return `x` with `whack` (logical) and `whack_stage` (`NA`, `"vmask"`, `"spike"` or
-#'   `"forward"`). A data frame comes back sorted by `vid` and `time`; a lazy table stays lazy.
+#'   `"forward"`). A data frame comes back sorted by `vid` and `time`; a lazy table comes back lazy.
 #'
 #' @examples
-#' f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-#' if (requireNamespace("duckdbfs", quietly = TRUE)) {
-#'   # data frame
-#'   pings <- dplyr::collect(duckdbfs::open_dataset(f))
-#'   d <- rb_whack_clean(pings)
-#'   table(d$example, d$whack_stage, useNA = "ifany")
-#'   track <- d[!d$whack, ]
+#' # whacky_sim: seven simulated tracks, one scenario each; `truth` marks the injected errors
+#' d <- rb_whack_clean(whacky_sim)
+#' table(d$scenario, d$whack_stage, useNA = "ifany")
+#' track <- d[!d$whack, ]
 #'
-#'   # DuckDB / parquet: stays lazy, labelled rows are never pulled into R
-#'   duckdbfs::open_dataset(f) |> rb_whack_clean() |> dplyr::count(whack_stage)
+#' # DuckDB / parquet: the pings pass through R one batch of whole vessels at a time;
+#' # the result is a lazy table
+#' if (requireNamespace("duckdb", quietly = TRUE) && requireNamespace("dbplyr", quietly = TRUE)) {
+#'   con <- DBI::dbConnect(duckdb::duckdb())
+#'   print(dplyr::copy_to(con, whacky_sim, "pings") |> rb_whack_clean() |> dplyr::count(whack_stage))
+#'   DBI::dbDisconnect(con, shutdown = TRUE)
 #' }
 #' @export
 rb_whack_clean <- function(x, kn_max = 25, max_gap_h = 4, min_dt_s = 10, batch_pings = 5e6, ...) {
@@ -172,16 +175,12 @@ rb_whack_clean <- function(x, kn_max = 25, max_gap_h = 4, min_dt_s = 10, batch_p
 #' @seealso [rb_whack_clean()], the full recipe; [rb_whack_forward()], its second stage.
 #'
 #' @examples
-#' f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-#' if (requireNamespace("duckdbfs", quietly = TRUE)) {
-#'   pings <- dplyr::collect(duckdbfs::open_dataset(f))
-#'   d <- rb_whack_sda(pings)
-#'   table(d$example, d$whack_sda, useNA = "ifany")
+#' d <- rb_whack_sda(whacky_sim)
+#' table(d$scenario, d$whack_sda, useNA = "ifany")
 #'
-#'   # argosfilter's own settings
-#'   d <- rb_whack_sda(pings, ang = c(15, 25), distlim = c(2500, 5000),
-#'                     speedlim_kn = c(0, 0), vmask_min_dist = 5000)
-#' }
+#' # argosfilter's own settings
+#' d <- rb_whack_sda(whacky_sim, ang = c(15, 25), distlim = c(2500, 5000),
+#'                   speedlim_kn = c(0, 0), vmask_min_dist = 5000)
 #' @export
 rb_whack_sda <- function(x, kn_max = 25, ang = 25, distlim = rep(0, length(ang)),
                       speedlim_kn = rep(kn_max, length(ang)), vmask_min_dist = 0,
@@ -238,13 +237,10 @@ rb_whack_sda <- function(x, kn_max = 25, ang = 25, distlim = rep(0, length(ang))
 #' @seealso [rb_whack_clean()], the full recipe.
 #'
 #' @examples
-#' f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-#' if (requireNamespace("duckdbfs", quietly = TRUE)) {
-#'   pings <- dplyr::collect(duckdbfs::open_dataset(f))
-#'   # on its own, the forward scan adopts the noisy logger's bad first ping as its anchor
-#'   d <- rb_whack_forward(pings)
-#'   table(d$example, d$whack2)
-#' }
+#' # on its own, the forward scan adopts a bad first ping after a gap as its anchor:
+#' # it flags 3 pings where rb_whack_clean() flags only the bad one
+#' d <- rb_whack_forward(whacky_sim[whacky_sim$vid == 5, ])
+#' sum(d$whack2)
 #' @export
 rb_whack_forward <- function(x, kn_max = 25, max_gap_h = 4, min_dt_s = 10) {
   ms_max      <- kn_max * 0.514444

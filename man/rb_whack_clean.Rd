@@ -30,7 +30,7 @@ rb_whack_clean(
 }
 \value{
 \code{x} with \code{whack} (logical) and \code{whack_stage} (\code{NA}, \code{"vmask"}, \code{"spike"} or
-\code{"forward"}). A data frame comes back sorted by \code{vid} and \code{time}; a lazy table stays lazy.
+\code{"forward"}). A data frame comes back sorted by \code{vid} and \code{time}; a lazy table comes back lazy.
 }
 \description{
 The recommended filter for vessel positions. It labels, it does not remove: every
@@ -58,15 +58,17 @@ and at 60 s, 6,881. Same-second reports come mostly from two feeds merged.
 }
 \section{Data frame and DuckDB}{
 
+The labelling always runs in compiled code, in R; DuckDB never runs the filter itself.
 \itemize{
-\item \strong{data.frame} - the whole table is sorted by \code{vid}, \code{time} and processed in one
-compiled call.
+\item \strong{data.frame} - the whole frame is sorted by \code{vid}, \code{time} and labelled in one
+compiled call. A table too big for memory is split by the caller into batches of whole
+vessels, which is exact for the reason given below.
 \item \strong{lazy DuckDB table} (\code{tbl_lazy}) - the algorithm is sequential per vessel (a ping's
 fate depends on the pings kept before it), which SQL window functions cannot express,
 so the table is processed in \strong{batches of whole vessels} (a vessel's result depends on
 no other vessel, so batching is exact). Each batch is collected with only
 \code{vid}, \code{time}, \code{lon}, \code{lat}, labelled in compiled code, and only the \strong{flagged} rows
-(about 0.5 percent) are written back to a temporary table on the same connection. The
+(well under 1 percent) are written back to a temporary table on the same connection. The
 result is a lazy table: \code{x} left-joined to those labels, so the next verbs, a filter
 or a \code{write_dataset()}, run in DuckDB and the full table is never held in R. Row order
 of the lazy result is not guaranteed.
@@ -74,15 +76,16 @@ of the lazy result is not guaranteed.
 }
 
 \examples{
-f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-if (requireNamespace("duckdbfs", quietly = TRUE)) {
-  # data frame
-  pings <- dplyr::collect(duckdbfs::open_dataset(f))
-  d <- rb_whack_clean(pings)
-  table(d$example, d$whack_stage, useNA = "ifany")
-  track <- d[!d$whack, ]
+# whacky_sim: seven simulated tracks, one scenario each; `truth` marks the injected errors
+d <- rb_whack_clean(whacky_sim)
+table(d$scenario, d$whack_stage, useNA = "ifany")
+track <- d[!d$whack, ]
 
-  # DuckDB / parquet: stays lazy, labelled rows are never pulled into R
-  duckdbfs::open_dataset(f) |> rb_whack_clean() |> dplyr::count(whack_stage)
+# DuckDB / parquet: the pings pass through R one batch of whole vessels at a time;
+# the result is a lazy table
+if (requireNamespace("duckdb", quietly = TRUE) && requireNamespace("dbplyr", quietly = TRUE)) {
+  con <- DBI::dbConnect(duckdb::duckdb())
+  print(dplyr::copy_to(con, whacky_sim, "pings") |> rb_whack_clean() |> dplyr::count(whack_stage))
+  DBI::dbDisconnect(con, shutdown = TRUE)
 }
 }

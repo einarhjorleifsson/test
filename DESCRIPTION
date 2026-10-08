@@ -8,10 +8,11 @@ Authors@R: c(
 Description: A review copy of the whacky-position filter rb_whack_clean(). It
     labels implausible positions in vessel tracks (AIS, VMS) with a speed-distance-angle filter after Freitas et al.
     (2008), followed by a forward speed scan, and never drops a row. Works on a
-    data frame and on a lazy DuckDB table. Includes rb_whack_duplicates(), which
-    flags near-duplicate reports from merged feeds, to run before it.
+    data frame and on a lazy DuckDB table. Six simulated tracks with known
+    errors show what it does and where it fails.
 License: GPL (>= 3)
 Encoding: UTF-8
+LazyData: true
 Depends:
     R (>= 4.1.0)
 Imports:
@@ -24,7 +25,7 @@ Suggests:
     DBI,
     dbplyr,
     duckdb,
-    duckdbfs,
+    ggplot2,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)

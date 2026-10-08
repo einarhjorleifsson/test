@@ -67,16 +67,12 @@ years of Icelandic AIS (2012 and 2016, 32 variants): a speed test, \code{vmask_m
 }
 
 \examples{
-f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-if (requireNamespace("duckdbfs", quietly = TRUE)) {
-  pings <- dplyr::collect(duckdbfs::open_dataset(f))
-  d <- rb_whack_sda(pings)
-  table(d$example, d$whack_sda, useNA = "ifany")
+d <- rb_whack_sda(whacky_sim)
+table(d$scenario, d$whack_sda, useNA = "ifany")
 
-  # argosfilter's own settings
-  d <- rb_whack_sda(pings, ang = c(15, 25), distlim = c(2500, 5000),
-                    speedlim_kn = c(0, 0), vmask_min_dist = 5000)
-}
+# argosfilter's own settings
+d <- rb_whack_sda(whacky_sim, ang = c(15, 25), distlim = c(2500, 5000),
+                  speedlim_kn = c(0, 0), vmask_min_dist = 5000)
 }
 \references{
 Freitas, C., Lydersen, C., Fedak, M.A. and Kovacs, K.M. (2008). A simple

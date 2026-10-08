@@ -2,7 +2,6 @@
 
 export(rb_distance)
 export(rb_whack_clean)
-export(rb_whack_duplicates)
 export(rb_whack_forward)
 export(rb_whack_sda)
 importFrom(Rcpp,sourceCpp)

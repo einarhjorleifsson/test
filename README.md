@@ -9,6 +9,19 @@ positions in vessel tracks. It holds only the filter, so that it can be
 read, run and criticised on its own. Comments on the method are more
 welcome than comments on the code.
 
+## Install
+
+The filter is C++, so a compiler is needed first: Rtools on Windows,
+`xcode-select --install` on macOS, `r-base-dev` on Linux. Then:
+
+``` r
+install.packages("remotes")
+remotes::install_github("einarhjorleifsson/test")
+```
+
+The package needs only dplyr and Rcpp. The examples below also use
+ggplot2.
+
 ## The method
 
 `rb_whack_clean()` labels; it never drops a row. Every ping gets `whack`
@@ -25,195 +38,241 @@ re-implemented in C++ (`rb_whack_sda()`), with four settings changed for
 vessels: 25 knots, a speed test in place of a distance test, every vmask
 flag stands, and a time-step floor in place of argosfilter’s 1 s added
 to every step. The forward scan (`rb_whack_forward()`) runs on what they
-leave. On 543.6 million Icelandic AIS pings (2007–2026) it flags 0.27 %.
+leave.
 
 Every speed, in all three stages, uses a time step of at least
 `min_dt_s` = 10 s: over a few seconds the error in position and the
 whole-second timestamps dominate a speed. The price is that within 10 s
-a jump is seen only if it is more than 130 m (`kn_max × min_dt_s`). On
-two months of Icelandic AIS (7.2 million pings) a floor of 10 s kept no
-leg longer than 200 m at over 25 knots; 20 s kept 575 and 60 s kept
-6,881. On the whole record, 10 s in place of a 1-microsecond floor
-halves the flags, almost all of them near-duplicate reports from two
-merged feeds, and leaves the length of the kept track unchanged.
+a jump is seen only if it is more than 130 m (`kn_max × min_dt_s`).
 
-## Merged feeds: near-duplicates first
+## Simulated tracks
 
-When tracks from two feeds are merged (say a national receiver network
-and a commercial terrestrial or satellite feed), a vessel heard by both
-is reported twice: the same fix, a second or two apart and centimetres
-to metres apart. Such a pair is not whacky, and it is not an exact
-duplicate either: neither a match on `(vid, time)` nor on whole rows
-removes it. A short time-step floor used to remove one copy by accident,
-as an “impossible” speed; with the 10 s floor `rb_whack_clean()`
-correctly leaves the pair alone. So the copies are taken out first, by
-what they are:
-
-`rb_whack_duplicates()` flags a ping when a feed ranked higher in
-`priority` has a ping of the same `vid` within `max_dt_s` = 10 s and
-within what `kn_max` allows in that time (128.6 m), among the three
-nearest pings on each side. The top feed is never flagged; two pings of
-one feed are left alone. In the Icelandic record (four feeds, 2013–2026)
-it flags 1.2 % of pings, with a median gap of 1–4 s and a median
-distance of 0.1–0.4 m by feed pair.
-
-The four examples below come from one feed and carry no feed column, so
-this is shown on a constructed case: one stk fix, its astd copy 2 s and
-0.2 m later, and an astd fix a minute on.
+`whacky_sim` holds seven vessels, one scenario each, with pings every 5
+minutes and 10 m of GPS noise (`data-raw/whacky_sim.R` builds it).
+`truth` marks the pings moved off their track on purpose: the errors the
+filter should find. Scenarios 6 and 7 contain no error at all.
 
 ``` r
 library(test)
-t0 <- as.POSIXct("2000-01-01 00:00:00", tz = "UTC")
-rb_whack_duplicates(vid  = c(1, 1, 1),
-                    time = t0 + c(0, 2, 60),
-                    lon  = c(-22, -22.000004, -22.01),
-                    lat  = c(64, 64, 64),
-                    feed = c("stk", "astd", "astd"))
-#> [1] FALSE  TRUE FALSE
+library(dplyr)
+library(ggplot2)
+
+d <- rb_whack_clean(whacky_sim)
+d |>
+  group_by(scenario) |>
+  summarise(pings = n(), injected = sum(truth), flagged = sum(whack),
+            missed = sum(truth & !whack), false_alarm = sum(whack & !truth))
+#> # A tibble: 7 × 6
+#>   scenario                pings injected flagged missed false_alarm
+#>   <chr>                   <int>    <int>   <int>  <int>       <int>
+#> 1 1 spike                    60        1       1      0           0
+#> 2 2 burst aside              60        4       4      0           0
+#> 3 3 burst ahead              60        4      12      0           8
+#> 4 4 burst near               60        4       4      1           1
+#> 5 5 bad ping after a gap     60        1       1      0           0
+#> 6 6 real move after a gap    60        0       0      0           0
+#> 7 7 fast vessel              52        0      13      0          13
 ```
 
-In a pipeline:
-`mutate(dup = rb_whack_duplicates(vid, time, lon, lat, provider))`, keep
-`filter(!dup)`, then `rb_whack_clean()`.
-
-## Install
-
-The filter is C++, so a compiler is needed first: Rtools on Windows,
-`xcode-select --install` on macOS, `r-base-dev` on Linux. Then, from the
-tarball (or the unpacked folder) you received:
+On the map, the grey line joins the pings in time order, a coloured
+point is a flagged ping and a ring is an injected error. A ring with a
+grey point inside is a miss; a coloured point with no ring is a false
+alarm.
 
 ``` r
-install.packages(c("remotes", "duckdbfs"))
-remotes::install_local("test_0.1.0.tar.gz")
+ggplot(d, aes(lon, lat)) +
+  geom_path(colour = "grey") +
+  geom_point(aes(colour = whack_stage)) +
+  geom_point(data = filter(d, truth), shape = 1, size = 4) +
+  facet_wrap(~ scenario, scales = "free") +
+  scale_colour_brewer(palette = "Set1", na.value = "grey")
 ```
 
-The package itself needs only dplyr and Rcpp; duckdbfs reads the example
-file below and runs the DuckDB path.
+![](man/figures/README-map-1.png)<!-- -->
 
-## Four examples
-
-Four short tracks from the Icelandic AIS data, chosen to show a typical
-case and three hard ones. They are anonymised: the vessel id is replaced
-by 1–4, each track starts on 2000-01-01 00:00 UTC, and the longitudes
-are shifted by a constant per track. Neither shift changes a time step,
-a distance or an angle, so the labels are those of the original data
-(checked).
-
-The input is one row per ping with `vid`, `time` (POSIXct), `lon` and
-`lat`; other columns are carried along.
+The speed from the previous ping (log scale) shows why; the dashed line
+is `kn_max`.
 
 ``` r
-library(test)
-library(dplyr, warn.conflicts = FALSE)
-
-f <- system.file("extdata", "whacky_examples.parquet", package = "test")
-pings <- duckdbfs::open_dataset(f) |> collect()
-
-d <- rb_whack_clean(pings)
-d |> count(example, whack_stage)
-#> # A tibble: 10 × 3
-#>    example     whack_stage     n
-#>    <chr>       <chr>       <int>
-#>  1 fast        forward         4
-#>  2 fast        <NA>           43
-#>  3 noisy       forward         1
-#>  4 noisy       spike           2
-#>  5 noisy       vmask          20
-#>  6 noisy       <NA>            1
-#>  7 placeholder vmask          18
-#>  8 placeholder <NA>            4
-#>  9 spike       vmask           1
-#> 10 spike       <NA>           20
+d |>
+  group_by(vid) |>
+  mutate(kn = rb_distance(lag(lon), lag(lat), lon, lat) /
+           as.numeric(time - lag(time), units = "secs") / 0.514444) |>
+  ggplot(aes(time, kn)) +
+  geom_line(colour = "grey") +
+  geom_point(aes(colour = whack_stage)) +
+  geom_hline(yintercept = 25, linetype = 2) +
+  scale_y_log10() +
+  facet_wrap(~ scenario, scales = "free_x") +
+  scale_colour_brewer(palette = "Set1", na.value = "grey")
 ```
 
-![](man/figures/README-plot-1.png)<!-- -->
+![](man/figures/README-speed-1.png)<!-- -->
 
-**spike** – the common case. A position every few minutes, and one ping
-that is reached at 26 knots and left at 113. vmask flags it, nothing
-else.
+1.  **Spike**: found by the first stage, nothing else touched.
+2.  **Burst aside**: four pings 25 km to the side of the track; all four
+    found, nothing else.
+3.  **Burst ahead**: the same burst moved 25 km along the vessel’s
+    heading. All four are found, but vmask also takes six good pings
+    before it and two after. vmask judges a ping by its speed to the
+    pings on either side and repeats on the thinned track, so once the
+    good ping next to the burst is gone the next one looks too fast, and
+    so on.
+4.  **Burst near**: four pings 9 km to the side. The forward scan meets
+    the third of them 15 minutes after the last good ping; 9.8 km in 15
+    minutes is under 25 knots, so it is kept and becomes the anchor, and
+    the next good ping, 9 km back, is flagged in its place.
+5.  **Bad ping after a gap**: found. The forward scan alone would adopt
+    it as its anchor and flag good pings instead (3 flags where the full
+    recipe has the one bad ping), which is why the two-sided stages come
+    first.
+6.  **Real move after a gap**: 47 km after 6 hours of silence is within
+    reach; nothing is flagged.
+7.  **Fast vessel**: steaming at 30 knots is above `kn_max`, so the
+    whole steaming leg is lost, and the first slow pings after it too,
+    until the track is back within reach of the last kept ping.
 
-**fast** – a vessel steaming at 24–25 knots. The forward scan flags four
-real pings, each reached at just over 25 knots. `kn_max` has to sit
-above the top speed of the fleet:
+The time-step floor matters where pings come seconds apart. A vessel at
+8 knots reported every 2 seconds with 15 m of GPS noise:
 
 ``` r
-pings |> filter(example == "fast") |> rb_whack_clean(kn_max = 26) |> count(whack_stage)
-#> # A tibble: 1 × 2
-#>   whack_stage     n
-#>   <chr>       <int>
-#> 1 <NA>           47
+set.seed(1)
+n <- 300
+jitter <- data.frame(vid = 1,
+                     time = as.POSIXct("2000-01-01", tz = "UTC") + 2 * (0:(n - 1)),
+                     lon = -22 + (0:(n - 1)) * 8.2 / 48745 + rnorm(n, 0, 15 / 48745),
+                     lat = 64 + rnorm(n, 0, 15 / 111195))
+c(floor_10s = sum(rb_whack_clean(jitter)$whack),
+  floor_1ms = sum(rb_whack_clean(jitter, min_dt_s = 0.001)$whack))
+#> floor_10s floor_1ms 
+#>         0       105
 ```
 
-**placeholder** – a smooth track at 13–15 knots, then a (0, 0) ping
-written by the logger, then one ping 13 days later. The (0, 0) ping is
-second to last, where vmask cannot judge it (it needs two pings on
-either side), so vmask flags the good pings before it one by one. That
-leaves a gap of almost seven hours, the forward scan restarts there, and
-the placeholder is kept. Placeholders are not positions and should go
-before the filter:
+## On the Icelandic record: results and speed
 
-``` r
-pings |> filter(example == "placeholder", !(lon == 0 & lat == 0)) |> rb_whack_clean() |> count(whack_stage)
-#> # A tibble: 1 × 2
-#>   whack_stage     n
-#>   <chr>       <int>
-#> 1 <NA>           21
-```
+The Icelandic AIS record 2007–2026 (2026 is part of a year), as the
+institute’s pipeline labels it: pings with a vessel id, after
+placeholder positions and a second feed’s copy of a report are taken
+out. The run is a script in that pipeline; the data are not part of this
+package and only the counts and times below are. Apple M4 Pro (14 cores,
+24 GB), R 4.5.2, the same filter code as in this package, from a clean
+build.
 
-**noisy** – a vessel lying still while its logger alternates between the
-true position and a position with one coordinate wrong. The first ping
-is a wrong one: it has no predecessor, so the two-sided tests cannot
-judge it and the forward scan takes it as its anchor. 23 of 24 pings are
-flagged, and the one kept is wrong. When bad pings are as frequent as
-good ones, the filter sees that neighbours disagree, not which of them
-is right.
+| year | pings | flagged | % | vmask | spike | forward | labelling, s |
+|----|---:|---:|---:|---:|---:|---:|---:|
+| 2007 | 3,003,248 | 34,326 | 1.14 | 27,857 | 194 | 6,275 | 1 |
+| 2008 | 6,112,200 | 70,319 | 1.15 | 63,136 | 296 | 6,887 | 2 |
+| 2009 | 6,997,517 | 121,448 | 1.74 | 114,486 | 187 | 6,775 | 3 |
+| 2010 | 7,249,973 | 61,515 | 0.85 | 55,809 | 516 | 5,190 | 2 |
+| 2011 | 7,648,627 | 24,503 | 0.32 | 19,927 | 81 | 4,495 | 2 |
+| 2012 | 8,105,566 | 47,019 | 0.58 | 34,629 | 396 | 11,994 | 3 |
+| 2013 | 21,403,472 | 87,576 | 0.41 | 72,969 | 295 | 14,312 | 7 |
+| 2014 | 27,060,286 | 114,990 | 0.42 | 86,666 | 576 | 27,748 | 9 |
+| 2015 | 34,117,103 | 189,678 | 0.56 | 105,022 | 691 | 83,965 | 11 |
+| 2016 | 38,241,190 | 201,846 | 0.53 | 170,315 | 1,393 | 30,138 | 12 |
+| 2017 | 67,721,014 | 86,970 | 0.13 | 44,104 | 771 | 42,095 | 23 |
+| 2018 | 51,409,808 | 47,844 | 0.09 | 29,134 | 365 | 18,345 | 16 |
+| 2019 | 49,554,734 | 48,609 | 0.10 | 28,877 | 295 | 19,437 | 16 |
+| 2020 | 42,634,923 | 32,261 | 0.08 | 18,107 | 177 | 13,977 | 14 |
+| 2021 | 29,574,962 | 29,424 | 0.10 | 16,169 | 150 | 13,105 | 9 |
+| 2022 | 30,606,985 | 32,928 | 0.11 | 18,448 | 161 | 14,319 | 10 |
+| 2023 | 28,825,211 | 44,991 | 0.16 | 22,994 | 306 | 21,691 | 10 |
+| 2024 | 32,877,208 | 53,831 | 0.16 | 29,134 | 496 | 24,201 | 10 |
+| 2025 | 37,292,322 | 64,779 | 0.17 | 29,167 | 257 | 35,355 | 12 |
+| 2026 | 6,629,082 | 51,656 | 0.78 | 28,187 | 198 | 23,271 | 3 |
+| **all** | **537,065,431** | **1,446,513** | **0.27** | **1,015,137** | **7,801** | **423,575** | **175** |
+
+The share flagged falls from about 1 % to 0.1 % as AIS coverage grows
+from 2013 on. After the filter, 715 legs longer than 1 km at more than
+25 knots are left in the kept track.
+
+| how it was called | time | peak memory |
+|----|----|----|
+| data frame, one year at a time in batches of whole vessels (5 million pings) | 2.9 min labelling, 4.0 min in all | 4.2 GB |
+| lazy DuckDB table, one call on the whole record | 6.8 min | 17.4 GB |
+
+The labelling runs at about 3 million pings a second on one core. The
+DuckDB call takes the same batches through R plus a numbering of all 537
+million pings to join the flags back; the memory is DuckDB’s own, which
+by default may use 80 % of RAM and with a lower `memory_limit` spills to
+disk instead. It also judges each vessel’s whole 20-year track in one
+piece rather than a year at a time, so a few pings near the turn of a
+year are labelled differently: 1,443,538 flagged against 1,446,513. On
+one year the two calls agree exactly.
+
+If you install from source after running the tests (`devtools::test()`
+and `devtools::load_all()` compile the C++ unoptimised and leave the
+objects in `src/`), the installed filter can be three times slower.
+Install with `R CMD INSTALL --preclean` or from GitHub.
 
 ## DuckDB
 
-On a lazy DuckDB table (e.g. a parquet dataset opened with duckdbfs) the
-result stays lazy: whole vessels are labelled in batches and only the
-flagged rows go back to DuckDB, so a large dataset never has to fit in
-R. The labels are the same as on a data frame.
+The filter always runs in the compiled code, in R; DuckDB never runs it
+in SQL, because both vmask (repeated on the thinned track) and the
+forward scan (each ping judged against the last *kept* one) are
+sequential per vessel. What changes is who splits the data:
+
+- On a **data frame** the whole frame is labelled in one call. A table
+  too big for memory is split by the caller into batches of whole
+  vessels, which is exact because no vessel’s labels depend on
+  another’s.
+- On a **lazy DuckDB table** (e.g. a parquet dataset opened with
+  duckdbfs) `rb_whack_clean()` does that itself: it pulls one batch of
+  whole vessels (`batch_pings`, 5 million pings) into R at a time,
+  labels it, and writes only the flagged rows back to DuckDB. The result
+  is a lazy table, the input joined to those labels. R never holds more
+  than one batch; the labels are the same as on a data frame.
 
 ``` r
-duckdbfs::open_dataset(f) |> rb_whack_clean() |> count(example, whack_stage) |> collect() |>
-  arrange(example, whack_stage)
-#> # A tibble: 10 × 3
-#>    example     whack_stage     n
-#>    <chr>       <chr>       <dbl>
-#>  1 fast        forward         4
-#>  2 fast        <NA>           43
-#>  3 noisy       forward         1
-#>  4 noisy       spike           2
-#>  5 noisy       vmask          20
-#>  6 noisy       <NA>            1
-#>  7 placeholder vmask          18
-#>  8 placeholder <NA>            4
-#>  9 spike       vmask           1
-#> 10 spike       <NA>           20
+con <- DBI::dbConnect(duckdb::duckdb())
+copy_to(con, whacky_sim, "pings") |>
+  rb_whack_clean() |>
+  count(scenario, whack_stage) |>
+  collect()
+#> # A tibble: 16 × 3
+#>    scenario                whack_stage     n
+#>    <chr>                   <chr>       <dbl>
+#>  1 2 burst aside           vmask           4
+#>  2 7 fast vessel           <NA>           39
+#>  3 4 burst near            forward         2
+#>  4 4 burst near            vmask           2
+#>  5 3 burst ahead           <NA>           48
+#>  6 6 real move after a gap <NA>           60
+#>  7 1 spike                 <NA>           59
+#>  8 3 burst ahead           vmask           9
+#>  9 1 spike                 vmask           1
+#> 10 7 fast vessel           vmask          10
+#> 11 7 fast vessel           forward         3
+#> 12 5 bad ping after a gap  vmask           1
+#> 13 4 burst near            <NA>           56
+#> 14 3 burst ahead           forward         3
+#> 15 5 bad ping after a gap  <NA>           59
+#> 16 2 burst aside           <NA>           56
+DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 ## Open questions for the review
 
-- One `kn_max` for all vessels: fast vessels lose real track, while slow
-  gears could hide errors below it.
+- vmask erodes good track on both sides of a burst (scenario 3): should
+  a vmask flag be undone when the track on both sides agrees without it?
+- A burst within reach of the last good ping is partly kept, and then
+  good track is flagged in its place (scenario 4).
+- One `kn_max` for all vessels: fast vessels lose real track (scenario
+  7), while slow gears could hide errors below it. A limit per vessel,
+  or trusting a leg the vessel’s own reported speed confirms?
 - The time-step floor `min_dt_s` = 10 s: chosen on Icelandic AIS, where
-  steps under 10 s are about 1 % and come mostly from two feeds merged.
-  Is it right for denser or sparser data?
+  steps under 10 s are about 1 % of legs. Is it right for denser or
+  sparser data?
 - The ends of a track: the first and last two pings cannot be judged
   from both sides.
-- Should placeholder positions ((0, 0), `lon == lat`) be removed inside
-  the filter rather than before it?
-- Near-duplicates: is 10 s and 128.6 m the right window, and should the
-  copy be dropped or the two reports merged into one?
 - Interleaved streams, two transmitters reporting under one id: the
   filter drops most of such a burst.
 
 ## AI use
 
-This package was assembled, the examples extracted and anonymised, and
-this README drafted by Claude (Anthropic) at the author’s request. The
-method is the author’s.
+This package was assembled, the simulated tracks written and this README
+drafted by Claude (Anthropic) at the author’s request. The method is the
+author’s.
 
 ## Reference
 

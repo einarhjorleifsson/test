@@ -6,14 +6,14 @@
 \alias{test-package}
 \title{test: Label Whacky Vessel Positions (Review Copy)}
 \description{
-A review copy of the whacky-position filter rb_whack_clean(). It labels implausible positions in vessel tracks (AIS, VMS) with a speed-distance-angle filter after Freitas et al. (2008), followed by a forward speed scan, and never drops a row. Works on a data frame and on a lazy DuckDB table. Includes rb_whack_duplicates(), which flags near-duplicate reports from merged feeds, to run before it.
+A review copy of the whacky-position filter rb_whack_clean(). It labels implausible positions in vessel tracks (AIS, VMS) with a speed-distance-angle filter after Freitas et al. (2008), followed by a forward speed scan, and never drops a row. Works on a data frame and on a lazy DuckDB table. Six simulated tracks with known errors show what it does and where it fails.
 }
 \author{
-\strong{Maintainer}: Einar Hjörleifsson \email{einar.hjorleifsson@gmail.com}
+\strong{Maintainer}: Einar Hj<U+00F6>rleifsson \email{einar.hjorleifsson@gmail.com}
 
 Authors:
 \itemize{
-  \item Einar Hjörleifsson \email{einar.hjorleifsson@gmail.com}
+  \item Einar Hj<U+00F6>rleifsson \email{einar.hjorleifsson@gmail.com}
 }
 
 }
